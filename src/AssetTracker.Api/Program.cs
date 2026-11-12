@@ -18,7 +18,7 @@ var signingKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey));
 
 builder.Services.AddOpenApi();
 builder.Services.AddDbContext<AppDbContext>(options =>
-    options.UseSqlite("Data Source=assets.db"));
+        options.UseSqlite(builder.Configuration.GetConnectionString("Default") ?? "Data Source=assets.db"));
 builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 
@@ -152,3 +152,4 @@ assets.MapDelete("/{id:int}", async (int id, AppDbContext db) =>
 app.Run();
 
 record LoginRequest(string Username, string Password);
+public partial class Program { }
