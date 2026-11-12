@@ -1,41 +1,77 @@
+using System.Text.Json.Serialization;
+using AssetTracker.Api.Data;
+using AssetTracker.Api.Models;
+using Microsoft.EntityFrameworkCore;
+
 var builder = WebApplication.CreateBuilder(args);
 
-// Add services to the container.
-// Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
 builder.Services.AddOpenApi();
+builder.Services.AddDbContext<AppDbContext>(options =>
+    options.UseSqlite("Data Source=assets.db"));
+builder.Services.ConfigureHttpJsonOptions(options =>
+    options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 
 var app = builder.Build();
 
-// Configure the HTTP request pipeline.
-if (app.Environment.IsDevelopment())
+// Create the database file the first time the app runs
+using (var scope = app.Services.CreateScope())
 {
-    app.MapOpenApi();
+    scope.ServiceProvider.GetRequiredService<AppDbContext>().Database.EnsureCreated();
 }
 
-app.UseHttpsRedirection();
+app.MapOpenApi();
+app.UseSwaggerUI(options =>
+    options.SwaggerEndpoint("/openapi/v1.json", "Asset Tracker API"));
 
-var summaries = new[]
-{
-    "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"
-};
+var assets = app.MapGroup("/api/assets").WithTags("Assets");
 
-app.MapGet("/weatherforecast", () =>
+// Get all assets
+assets.MapGet("/", async (AppDbContext db) =>
+    await db.Assets.ToListAsync());
+
+// Get one asset by its id
+assets.MapGet("/{id:int}", async (int id, AppDbContext db) =>
+    await db.Assets.FindAsync(id) is Asset asset
+        ? Results.Ok(asset)
+        : Results.NotFound());
+
+// Add a new asset
+assets.MapPost("/", async (Asset asset, AppDbContext db) =>
 {
-    var forecast =  Enumerable.Range(1, 5).Select(index =>
-        new WeatherForecast
-        (
-            DateOnly.FromDateTime(DateTime.Now.AddDays(index)),
-            Random.Shared.Next(-20, 55),
-            summaries[Random.Shared.Next(summaries.Length)]
-        ))
-        .ToArray();
-    return forecast;
-})
-.WithName("GetWeatherForecast");
+    if (string.IsNullOrWhiteSpace(asset.Name))
+        return Results.BadRequest("Name is required.");
+
+    asset.Id = 0;
+    db.Assets.Add(asset);
+    await db.SaveChangesAsync();
+    return Results.Created($"/api/assets/{asset.Id}", asset);
+});
+
+// Update an existing asset
+assets.MapPut("/{id:int}", async (int id, Asset updated, AppDbContext db) =>
+{
+    var asset = await db.Assets.FindAsync(id);
+    if (asset is null) return Results.NotFound();
+
+    asset.Name = updated.Name;
+    asset.Type = updated.Type;
+    asset.SerialNumber = updated.SerialNumber;
+    asset.Status = updated.Status;
+    asset.AssignedTo = updated.AssignedTo;
+    asset.PurchaseDate = updated.PurchaseDate;
+    await db.SaveChangesAsync();
+    return Results.Ok(asset);
+});
+
+// Delete an asset
+assets.MapDelete("/{id:int}", async (int id, AppDbContext db) =>
+{
+    var asset = await db.Assets.FindAsync(id);
+    if (asset is null) return Results.NotFound();
+
+    db.Assets.Remove(asset);
+    await db.SaveChangesAsync();
+    return Results.NoContent();
+});
 
 app.Run();
-
-record WeatherForecast(DateOnly Date, int TemperatureC, string? Summary)
-{
-    public int TemperatureF => 32 + (int)(TemperatureC / 0.5556);
-}
